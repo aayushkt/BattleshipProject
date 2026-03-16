@@ -5,8 +5,11 @@ import {
   PutCommand,
   QueryCommand,
   DeleteCommand,
+  UpdateCommand,
+  BatchGetCommand,
+  BatchWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { GameState } from '../game/types';
+import { GameState, StreamerGameState, ViewerState } from '../game/types';
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
@@ -92,4 +95,138 @@ export async function saveMove(gameId: string, playerId: string, x: number, y: n
       sunk,
     },
   }));
+}
+
+// Streamer mode operations
+export async function getStreamerGame(gameId: string): Promise<StreamerGameState | null> {
+  const result = await docClient.send(new GetCommand({
+    TableName: TABLE_NAME,
+    Key: { PK: `GAME#${gameId}`, SK: 'STREAMER' },
+  }));
+  return result.Item?.data as StreamerGameState | null;
+}
+
+export async function saveStreamerGame(state: StreamerGameState): Promise<void> {
+  await docClient.send(new PutCommand({
+    TableName: TABLE_NAME,
+    Item: {
+      PK: `GAME#${state.gameId}`,
+      SK: 'STREAMER',
+      data: state,
+      GSI1PK: state.gameId,
+      updatedAt: Date.now(),
+    },
+  }));
+}
+
+export async function getViewer(gameId: string, viewerId: string): Promise<ViewerState | null> {
+  const result = await docClient.send(new GetCommand({
+    TableName: TABLE_NAME,
+    Key: { PK: `GAME#${gameId}`, SK: `VIEWER#${viewerId}` },
+  }));
+  return result.Item?.data as ViewerState | null;
+}
+
+export async function saveViewer(gameId: string, viewer: ViewerState): Promise<void> {
+  await docClient.send(new PutCommand({
+    TableName: TABLE_NAME,
+    Item: {
+      PK: `GAME#${gameId}`,
+      SK: `VIEWER#${viewer.viewerId}`,
+      data: viewer,
+      GSI1PK: gameId,
+      GSI1SK: `VIEWER#${viewer.viewerId}`,
+      updatedAt: Date.now(),
+    },
+  }));
+}
+
+export async function deleteViewer(gameId: string, viewerId: string): Promise<void> {
+  await docClient.send(new DeleteCommand({
+    TableName: TABLE_NAME,
+    Key: { PK: `GAME#${gameId}`, SK: `VIEWER#${viewerId}` },
+  }));
+}
+
+export async function getAllViewers(gameId: string): Promise<ViewerState[]> {
+  const result = await docClient.send(new QueryCommand({
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+    ExpressionAttributeValues: { ':pk': `GAME#${gameId}`, ':sk': 'VIEWER#' },
+  }));
+  return (result.Items || []).map(item => item.data as ViewerState);
+}
+
+export async function incrementStreamerLobbyCount(
+  gameId: string,
+  field: 'viewerCount' | 'readyCount' | 'viewersFiredThisTurn' | 'activeViewerCount',
+  delta: number
+): Promise<void> {
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { PK: `GAME#${gameId}`, SK: 'STREAMER' },
+    UpdateExpression: `ADD #data.#field :delta`,
+    ExpressionAttributeNames: { '#data': 'data', '#field': field },
+    ExpressionAttributeValues: { ':delta': delta },
+  }));
+}
+
+export async function incrementCellHit(gameId: string, x: number, y: number): Promise<void> {
+  const key = `${x},${y}`;
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { PK: `GAME#${gameId}`, SK: 'STREAMER' },
+    UpdateExpression: `ADD #data.#board.#hits.#cell :one`,
+    ExpressionAttributeNames: {
+      '#data': 'data',
+      '#board': 'streamerBoard',
+      '#hits': 'cellHits',
+      '#cell': key,
+    },
+    ExpressionAttributeValues: { ':one': 1 },
+  }));
+}
+
+export async function batchGetViewers(gameId: string, viewerIds: string[]): Promise<ViewerState[]> {
+  if (viewerIds.length === 0) return [];
+  
+  const results: ViewerState[] = [];
+  // BatchGet max 100 items per call
+  for (let i = 0; i < viewerIds.length; i += 100) {
+    const batch = viewerIds.slice(i, i + 100);
+    const keys = batch.map(id => ({ PK: `GAME#${gameId}`, SK: `VIEWER#${id}` }));
+    
+    const response = await docClient.send(new BatchGetCommand({
+      RequestItems: { [TABLE_NAME]: { Keys: keys } },
+    }));
+    
+    const items = response.Responses?.[TABLE_NAME] || [];
+    results.push(...items.map(item => item.data as ViewerState));
+  }
+  return results;
+}
+
+export async function batchSaveViewers(gameId: string, viewers: ViewerState[]): Promise<void> {
+  if (viewers.length === 0) return;
+  
+  // BatchWrite max 25 items per call
+  for (let i = 0; i < viewers.length; i += 25) {
+    const batch = viewers.slice(i, i + 25);
+    const requests = batch.map(viewer => ({
+      PutRequest: {
+        Item: {
+          PK: `GAME#${gameId}`,
+          SK: `VIEWER#${viewer.viewerId}`,
+          data: viewer,
+          GSI1PK: gameId,
+          GSI1SK: `VIEWER#${viewer.viewerId}`,
+          updatedAt: Date.now(),
+        },
+      },
+    }));
+    
+    await docClient.send(new BatchWriteCommand({
+      RequestItems: { [TABLE_NAME]: requests },
+    }));
+  }
 }

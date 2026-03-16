@@ -10,10 +10,8 @@ import {
   generateAIShips,
   getAIShot,
   getShipCells,
-  calculateCurrentTurn,
   Ship,
   GameState,
-  TURN_DURATION_MS,
 } from '../game';
 import {
   getGame,
@@ -22,8 +20,22 @@ import {
   getConnection,
   getConnectionsForGame,
   saveMove,
+  getStreamerGame,
 } from '../db';
 import { initApiClient, sendToConnection, broadcast } from './websocket';
+import {
+  handleCreateStreamerGame,
+  handleViewerJoin,
+  handleStreamerPlaceShips,
+  handleViewerPlaceShips,
+  handleLockLobby,
+  handleStartStreamerGame,
+  handleStreamerFire,
+  handleViewerFire,
+  handleStreamerReconnect,
+  handleStreamerForfeit,
+  handleViewerForfeit,
+} from './streamer';
 
 interface Message {
   action: string;
@@ -46,7 +58,11 @@ export const handler: APIGatewayProxyWebsocketHandlerV2 = async (event) => {
   try {
     switch (message.action) {
       case 'createGame':
-        await handleCreateGame(connectionId, message.payload);
+        if (message.payload?.mode === 'streamer') {
+          await handleCreateStreamerGame(connectionId);
+        } else {
+          await handleCreateGame(connectionId, message.payload);
+        }
         break;
       case 'joinGame':
         await handleJoinGame(connectionId, message.payload);
@@ -60,11 +76,26 @@ export const handler: APIGatewayProxyWebsocketHandlerV2 = async (event) => {
       case 'forfeit':
         await handleForfeit(connectionId);
         break;
+      case 'streamerForfeit':
+        await handleStreamerForfeit(connectionId);
+        break;
+      case 'viewerForfeit':
+        await handleViewerForfeit(connectionId);
+        break;
       case 'reconnect':
         await handleReconnect(connectionId, message.payload);
         break;
       case 'getState':
         await handleGetState(connectionId, message.payload);
+        break;
+      case 'lockLobby':
+        await handleLockLobby(connectionId, true);
+        break;
+      case 'unlockLobby':
+        await handleLockLobby(connectionId, false);
+        break;
+      case 'startGame':
+        await handleStartStreamerGame(connectionId);
         break;
       default:
         await sendError(connectionId, 'UNKNOWN_ACTION', `Unknown action: ${message.action}`);
@@ -99,6 +130,13 @@ async function handleCreateGame(connectionId: string, payload: { mode: 'ai' | 'p
 }
 
 async function handleJoinGame(connectionId: string, payload: { gameId: string }) {
+  // Check if it's a streamer game first
+  const streamerGame = await getStreamerGame(payload.gameId);
+  if (streamerGame) {
+    await handleViewerJoin(connectionId, payload);
+    return;
+  }
+
   const state = await getGame(payload.gameId);
   if (!state) {
     await sendError(connectionId, 'GAME_NOT_FOUND', 'Game not found');
@@ -129,6 +167,13 @@ async function handleJoinGame(connectionId: string, payload: { gameId: string })
 }
 
 async function handleReconnect(connectionId: string, payload: { gameId: string; playerId: string }) {
+  // Check if it's a streamer game first
+  const streamerGame = await getStreamerGame(payload.gameId);
+  if (streamerGame) {
+    await handleStreamerReconnect(connectionId, payload.gameId, payload.playerId);
+    return;
+  }
+
   const state = await getGame(payload.gameId);
   if (!state) {
     await sendError(connectionId, 'GAME_NOT_FOUND', 'Game not found');
@@ -164,13 +209,8 @@ async function handleReconnect(connectionId: string, payload: { gameId: string; 
     }
   }
 
-  // Calculate actual current turn if game is playing
-  let yourTurn = false;
-  let turnStartedAt = state.turnStartedAt;
-  if (state.phase === 'playing' && state.turnStartedAt > 0) {
-    const { playerId: actualTurn } = calculateCurrentTurn(state);
-    yourTurn = actualTurn === payload.playerId;
-  }
+  // Determine whose turn it is
+  const yourTurn = state.phase === 'playing' && state.currentTurn === payload.playerId;
 
   await sendToConnection(connectionId, {
     event: 'reconnected',
@@ -186,7 +226,6 @@ async function handleReconnect(connectionId: string, payload: { gameId: string; 
       opponentJoined: !!opponent,
       opponentReady: opponent?.ready || false,
       yourTurn,
-      turnStartedAt,
       winner: state.winner === payload.playerId ? 'you' : state.winner ? 'opponent' : null,
     },
   });
@@ -196,6 +235,17 @@ async function handlePlaceShips(connectionId: string, payload: { ships: Ship[] }
   const conn = await getConnection(connectionId);
   if (!conn) {
     await sendError(connectionId, 'NOT_IN_GAME', 'Not in a game');
+    return;
+  }
+
+  // Check if it's a streamer game
+  const streamerGame = await getStreamerGame(conn.gameId);
+  if (streamerGame) {
+    if (streamerGame.streamerId === conn.playerId) {
+      await handleStreamerPlaceShips(connectionId, conn.gameId, conn.playerId, payload.ships);
+    } else {
+      await handleViewerPlaceShips(connectionId, conn.gameId, conn.playerId, payload.ships);
+    }
     return;
   }
 
@@ -251,18 +301,28 @@ async function handleFire(connectionId: string, payload: { x: number; y: number 
     return;
   }
 
+  // Check if it's a streamer game
+  const streamerGame = await getStreamerGame(conn.gameId);
+  if (streamerGame) {
+    if (streamerGame.streamerId === conn.playerId) {
+      await handleStreamerFire(connectionId, payload);
+    } else {
+      await handleViewerFire(connectionId, conn.gameId, conn.playerId, payload);
+    }
+    return;
+  }
+
   const state = await getGame(conn.gameId);
   if (!state) {
     await sendError(connectionId, 'GAME_NOT_FOUND', 'Game not found');
     return;
   }
 
-  // Calculate whose turn it actually is based on elapsed time
-  const { playerId: actualTurn, remainingMs } = calculateCurrentTurn(state);
-  if (actualTurn !== conn.playerId) {
+  // Check if it's this player's turn
+  if (state.currentTurn !== conn.playerId) {
     await sendToConnection(connectionId, {
       event: 'error',
-      payload: { code: 'NOT_YOUR_TURN', message: 'Not your turn', remainingMs },
+      payload: { code: 'NOT_YOUR_TURN', message: 'Not your turn' },
     });
     return;
   }
@@ -282,9 +342,8 @@ async function handleFire(connectionId: string, payload: { x: number; y: number 
 
   const result = fire(state, conn.playerId, payload.x, payload.y);
   
-  // Reset turn timer on successful fire
-  result.state.turnStartedAt = Date.now();
-  result.state.currentTurn = opponent.id; // Base turn is now opponent
+  // Switch turn to opponent
+  result.state.currentTurn = opponent.id;
   
   await saveGame(result.state);
   await saveMove(conn.gameId, conn.playerId, payload.x, payload.y, result.hit, result.sunk?.type);
@@ -316,7 +375,7 @@ async function handleFire(connectionId: string, payload: { x: number; y: number 
         });
       } else {
         await sendToConnection(connId, {
-          event: 'turnChange',
+          event: 'turnChanged',
           payload: { yourTurn: result.state.currentTurn === c.playerId },
         });
       }
@@ -403,7 +462,7 @@ async function handleAITurn(gameId: string, playerConnectionId: string, playerId
     });
   } else {
     await sendToConnection(playerConnectionId, {
-      event: 'turnChange',
+      event: 'turnChanged',
       payload: { yourTurn: true },
     });
   }

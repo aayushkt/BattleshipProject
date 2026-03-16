@@ -1,4 +1,4 @@
-import { GameState, Ship, Shot, Player, PlayerBoard, getShipCells, isShipSunk, ShipType, GameMode, TURN_DURATION_MS } from './types';
+import { GameState, Ship, Shot, Player, PlayerBoard, getShipCells, isShipSunk, ShipType, GameMode } from './types';
 
 export function createGame(gameId: string, playerId: string, mode: GameMode): GameState {
   const player1: Player = {
@@ -20,7 +20,6 @@ export function createGame(gameId: string, playerId: string, mode: GameMode): Ga
     player1,
     player2,
     currentTurn: playerId,
-    turnStartedAt: 0,
     winner: null,
   };
 }
@@ -58,7 +57,7 @@ export function placeShips(state: GameState, playerId: string, ships: Ship[]): G
 
   // Check if both players ready
   if (newState.player1.ready && newState.player2?.ready) {
-    return { ...newState, phase: 'playing', turnStartedAt: Date.now() };
+    return { ...newState, phase: 'playing' };
   }
 
   return newState;
@@ -75,20 +74,6 @@ export interface FireResult {
   sunk?: SunkShipInfo;
   gameOver: boolean;
   winner?: string;
-}
-
-// Calculate whose turn it is based on elapsed time
-export function calculateCurrentTurn(state: GameState): { playerId: string; remainingMs: number } {
-  const elapsed = Date.now() - state.turnStartedAt;
-  const turnIndex = Math.floor(elapsed / TURN_DURATION_MS) % 2;
-  const remainingMs = TURN_DURATION_MS - (elapsed % TURN_DURATION_MS);
-  
-  // turnIndex 0 = currentTurn (whoever started), turnIndex 1 = opponent
-  const baseTurnPlayer = state.currentTurn;
-  const otherPlayer = state.player1.id === baseTurnPlayer ? state.player2!.id : state.player1.id;
-  
-  const playerId = turnIndex === 0 ? baseTurnPlayer : otherPlayer;
-  return { playerId, remainingMs };
 }
 
 export function fire(state: GameState, playerId: string, x: number, y: number): FireResult {

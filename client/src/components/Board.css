@@ -58,7 +58,8 @@
 }
 
 .cell.sunk {
-  background: #742a2a;
+  background: #0a0a0a;
+  border: 1px solid #333;
 }
 
 .cell.pending {
@@ -69,4 +70,18 @@
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
+}
+
+.cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.heat-percent {
+  font-size: 10px;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 0 2px black;
 }

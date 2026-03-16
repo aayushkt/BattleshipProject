@@ -1,7 +1,7 @@
 export type ShipType = 'carrier' | 'battleship' | 'cruiser' | 'submarine' | 'destroyer';
 export type Orientation = 'horizontal' | 'vertical';
-export type GameMode = 'ai' | 'pvp';
-export type GamePhase = 'placing' | 'playing' | 'finished';
+export type GameMode = 'ai' | 'pvp' | 'streamer';
+export type GamePhase = 'placing' | 'lobby' | 'playing' | 'finished';
 
 export const SHIP_LENGTHS: Record<ShipType, number> = {
   carrier: 5,
@@ -38,16 +38,13 @@ export interface Player {
   ready: boolean; // ships placed
 }
 
-export const TURN_DURATION_MS = 45000;
-
 export interface GameState {
   gameId: string;
   mode: GameMode;
   phase: GamePhase;
   player1: Player;
   player2: Player | null; // null until opponent joins (or AI)
-  currentTurn: string; // player id (base turn, before timeout calculation)
-  turnStartedAt: number; // timestamp when turn timer started
+  currentTurn: string; // player id whose turn it is
   winner: string | null;
 }
 
@@ -70,4 +67,34 @@ export function isShipSunk(ship: Ship, shotsReceived: Shot[]): boolean {
   return cells.every(cell =>
     shotsReceived.some(shot => shot.x === cell.x && shot.y === cell.y && shot.hit)
   );
+}
+
+// Streamer mode types
+export interface StreamerBoard {
+  ships: Ship[];
+  cellHits: Record<string, number>; // "x,y" -> count of viewers who fired here
+}
+
+export interface StreamerGameState {
+  gameId: string;
+  streamerId: string;
+  phase: GamePhase;
+  lobbyLocked: boolean;
+  viewerCount: number;
+  readyCount: number;
+  streamerBoard: StreamerBoard;
+  winner: 'streamer' | 'viewers' | null;
+  currentTurn: 'streamer' | 'viewers';
+  viewersFiredThisTurn: number;
+  activeViewerCount: number; // viewers who haven't hit all 17 streamer ship cells yet
+}
+
+export interface ViewerState {
+  viewerId: string;
+  ready: boolean;
+  eliminated: boolean;
+  board: PlayerBoard;
+  shotsAtStreamer: Shot[];
+  connectionId: string;
+  hasFiredThisTurn: boolean;
 }

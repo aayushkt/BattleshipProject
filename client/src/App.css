@@ -218,3 +218,26 @@
 .game-info.waiting .turn-timer {
   color: #fbbf24;
 }
+
+
+.viewer-count {
+  font-size: 1.2em;
+  color: #4ade80;
+  margin: 10px 0;
+}
+
+.lobby-controls {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  justify-content: center;
+}
+
+.lobby-controls button {
+  padding: 10px 20px;
+}
+
+.lobby-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

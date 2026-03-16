@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { Board } from './components/Board';
 import { ShipPlacer } from './components/ShipPlacer';
-import { GameState, Ship, SunkShip, initialState, TURN_DURATION_MS } from './types';
+import { GameState, Ship, SunkShip, initialState, GameMode, SHIP_LENGTHS } from './types';
 import './App.css';
 
 const WS_URL = import.meta.env.VITE_WS_URL || null;
@@ -26,33 +26,27 @@ function clearSession() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+// Calculate streamer's remaining fleet from cellHits
+function calculateFleetRemaining(ships: Ship[], cellHits: Record<string, number>, viewerCount: number): number {
+  if (viewerCount === 0) return 17;
+  let total = 0;
+  for (const ship of ships) {
+    const length = SHIP_LENGTHS[ship.type];
+    for (let i = 0; i < length; i++) {
+      const x = ship.orientation === 'horizontal' ? ship.x + i : ship.x;
+      const y = ship.orientation === 'vertical' ? ship.y + i : ship.y;
+      const hits = cellHits[`${x},${y}`] || 0;
+      total += Math.max(0, 1 - hits / viewerCount);
+    }
+  }
+  return total;
+}
+
 export default function App() {
   const [state, setState] = useState<GameState>(initialState);
   const [joinGameId, setJoinGameId] = useState('');
-  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const { send, messages, clearMessages, readyState } = useWebSocket(WS_URL);
   const reconnectAttempted = useRef(false);
-
-  // Timer effect - runs every 100ms when game is playing
-  useEffect(() => {
-    if (state.phase !== 'playing' || !state.turnStartedAt) return;
-
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - state.turnStartedAt!;
-      const turnIndex = Math.floor(elapsed / TURN_DURATION_MS) % 2;
-      const remaining = TURN_DURATION_MS - (elapsed % TURN_DURATION_MS);
-      
-      setTimeRemaining(remaining);
-      
-      // turnIndex 0 = whoever had turn at start, turnIndex 1 = the other player
-      const shouldBeYourTurn = turnIndex === 0 ? state.yourTurnAtStart : !state.yourTurnAtStart;
-      if (shouldBeYourTurn !== state.yourTurn) {
-        setState(s => ({ ...s, yourTurn: shouldBeYourTurn }));
-      }
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [state.phase, state.turnStartedAt, state.yourTurn, state.yourTurnAtStart]);
 
   // Attempt reconnect on initial connection
   useEffect(() => {
@@ -79,8 +73,8 @@ export default function App() {
             gameId: payload.gameId,
             playerId: payload.playerId,
             mode: payload.mode,
-            phase: 'placing',
-            // AI mode: opponent is already joined and ready
+            role: payload.mode === 'streamer' ? 'streamer' : 'player',
+            phase: payload.mode === 'streamer' ? 'lobby' : 'placing',
             opponentJoined: payload.mode === 'ai',
             opponentReady: payload.mode === 'ai',
           }));
@@ -92,30 +86,75 @@ export default function App() {
             ...s,
             gameId: payload.gameId,
             playerId: payload.playerId,
+            mode: payload.mode || s.mode,
+            role: payload.role || 'player',
             phase: 'placing',
-            opponentJoined: true, // if we're joining, opponent (creator) exists
+            opponentJoined: true,
             opponentReady: payload.opponentReady || false,
+            streamerReady: payload.streamerReady || false,
+          }));
+          break;
+
+        case 'lobbyUpdate':
+          setState(s => ({
+            ...s,
+            viewerCount: payload.viewerCount,
+            readyCount: payload.readyCount,
+          }));
+          break;
+
+        case 'lobbyLockChanged':
+          setState(s => ({ ...s, lobbyLocked: payload.locked }));
+          break;
+
+        case 'kicked':
+          clearSession();
+          setState(s => ({
+            ...s,
+            phase: 'kicked',
+            kickReason: payload.reason,
           }));
           break;
 
         case 'reconnected':
-          setState(s => ({
-            ...s,
-            gameId: payload.gameId,
-            playerId: payload.playerId,
-            mode: payload.mode,
-            phase: payload.phase === 'placing' && payload.myShips.length > 0 ? 'waiting' : payload.phase,
-            myShips: payload.myShips,
-            myShots: payload.myShots,
-            opponentShots: payload.opponentShots,
-            sunkEnemyShips: payload.sunkEnemyShips || [],
-            opponentJoined: payload.opponentJoined ?? true,
-            opponentReady: payload.opponentReady ?? false,
-            yourTurn: payload.yourTurn,
-            turnStartedAt: payload.turnStartedAt || null,
-            yourTurnAtStart: payload.yourTurn,
-            winner: payload.winner,
-          }));
+          setState(s => {
+            const isStreamerMode = payload.mode === 'streamer';
+            const isStreamerRole = payload.role === 'streamer';
+            let phase = payload.phase;
+            
+            // For viewers in streamer mode during lobby, show placing/waiting
+            if (isStreamerMode && !isStreamerRole && payload.phase === 'lobby') {
+              phase = payload.myShips?.length > 0 ? 'waiting' : 'placing';
+            }
+            // For 1v1 placing phase with ships placed
+            if (!isStreamerMode && payload.phase === 'placing' && payload.myShips?.length > 0) {
+              phase = 'waiting';
+            }
+            
+            return {
+              ...s,
+              gameId: payload.gameId,
+              playerId: payload.playerId,
+              mode: payload.mode,
+              role: payload.role || 'player',
+              phase,
+              myShips: payload.myShips || [],
+              myShots: payload.myShots || [],
+              opponentShots: payload.opponentShots || [],
+              sunkEnemyShips: payload.sunkEnemyShips || [],
+              opponentJoined: payload.opponentJoined ?? true,
+              opponentReady: payload.opponentReady ?? false,
+              yourTurn: payload.yourTurn,
+              winner: payload.winner,
+              // Streamer fields
+              viewerCount: payload.viewerCount ?? s.viewerCount,
+              readyCount: payload.readyCount ?? s.readyCount,
+              lobbyLocked: payload.lobbyLocked ?? s.lobbyLocked,
+              cellHits: payload.cellHits || {},
+              waitingForViewers: payload.waitingForViewers || false,
+              streamerReady: payload.streamerReady ?? s.streamerReady,
+            };
+          });
           break;
 
         case 'opponentJoined':
@@ -134,9 +173,80 @@ export default function App() {
             ...s,
             phase: 'playing',
             yourTurn: payload.yourTurn,
-            turnStartedAt: Date.now(),
-            yourTurnAtStart: payload.yourTurn,
+            viewerCount: payload.viewerCount ?? s.viewerCount,
+            activeViewerCount: payload.viewerCount ?? s.viewerCount,
+            viewersFired: 0,
           }));
+          break;
+
+        case 'streamerFireResult':
+          setState(s => {
+            const key = `${payload.x},${payload.y}`;
+            return {
+              ...s,
+              myShots: [...s.myShots, { x: payload.x, y: payload.y, hit: payload.hitRatio > 0 }],
+              cellHits: payload.viewerDamage || s.cellHits,
+              attackHitRatios: { ...s.attackHitRatios, [key]: payload.hitRatio },
+              pendingShot: null,
+              hasFiredThisTurn: true,
+              yourTurn: false,
+              viewersFired: 0,
+            };
+          });
+          break;
+
+        case 'viewerHit':
+          // Streamer receives this when a viewer hits their ship
+          setState(s => {
+            const key = `${payload.x},${payload.y}`;
+            return {
+              ...s,
+              cellHits: { ...s.cellHits, [key]: (s.cellHits[key] || 0) + 1 },
+            };
+          });
+          break;
+
+        case 'viewerShot':
+          // Streamer receives this for all viewer shots (hits and misses)
+          setState(s => {
+            const key = `${payload.x},${payload.y}`;
+            const field = payload.hit ? 'cellHits' : 'cellMisses';
+            return {
+              ...s,
+              [field]: { ...s[field], [key]: (s[field][key] || 0) + 1 },
+              viewersFired: payload.viewersFired ?? s.viewersFired,
+              activeViewerCount: payload.activeViewerCount ?? s.activeViewerCount,
+            };
+          });
+          break;
+
+        case 'streamerFired':
+          setState(s => {
+            const sunkShip: SunkShip | undefined = payload.sunk;
+            return {
+              ...s,
+              opponentShots: [...s.opponentShots, {
+                x: payload.x,
+                y: payload.y,
+                hit: payload.hit,
+                sunk: sunkShip?.type,
+              }],
+              sunkEnemyShips: sunkShip ? [...s.sunkEnemyShips, sunkShip] : s.sunkEnemyShips,
+            };
+          });
+          break;
+
+        case 'viewerFireResult':
+          setState(s => ({
+            ...s,
+            myShots: [...s.myShots, { x: payload.x, y: payload.y, hit: payload.hit }],
+            pendingShot: null,
+            hasFiredThisTurn: true,
+          }));
+          break;
+
+        case 'waitingForViewers':
+          setState(s => ({ ...s, waitingForViewers: true }));
           break;
 
         case 'fireResult':
@@ -169,11 +279,11 @@ export default function App() {
           break;
 
         case 'turnChange':
+        case 'turnChanged':
           setState(s => ({
             ...s,
             yourTurn: payload.yourTurn,
-            turnStartedAt: Date.now(),
-            yourTurnAtStart: payload.yourTurn,
+            hasFiredThisTurn: false,
           }));
           break;
 
@@ -191,15 +301,12 @@ export default function App() {
           if (payload.code === 'GAME_NOT_FOUND' || payload.code === 'NOT_IN_GAME') {
             clearSession();
           }
-          // If NOT_YOUR_TURN, resync timer and clear pending shot without error message
-          if (payload.code === 'NOT_YOUR_TURN' && payload.remainingMs !== undefined) {
-            const yourTurnNow = false;
+          // If NOT_YOUR_TURN, just clear pending shot
+          if (payload.code === 'NOT_YOUR_TURN') {
             setState(s => ({
               ...s,
               pendingShot: null,
-              yourTurn: yourTurnNow,
-              turnStartedAt: Date.now() - (TURN_DURATION_MS - payload.remainingMs),
-              yourTurnAtStart: yourTurnNow,
+              yourTurn: false,
             }));
             break;
           }
@@ -212,7 +319,7 @@ export default function App() {
     clearMessages();
   }, [messages, clearMessages]);
 
-  const handleCreateGame = (mode: 'ai' | 'pvp') => {
+  const handleCreateGame = (mode: GameMode) => {
     send({ action: 'createGame', payload: { mode } });
   };
 
@@ -223,8 +330,17 @@ export default function App() {
   };
 
   const handlePlaceShips = (ships: Ship[]) => {
-    setState(s => ({ ...s, myShips: ships, phase: 'waiting' }));
+    setState(s => ({ ...s, myShips: ships, phase: s.mode === 'streamer' && s.role === 'streamer' ? 'lobby' : 'waiting' }));
     send({ action: 'placeShips', payload: { ships } });
+  };
+
+  const handleLockLobby = (lock: boolean) => {
+    send({ action: lock ? 'lockLobby' : 'unlockLobby', payload: {} });
+    setState(s => ({ ...s, lobbyLocked: lock }));
+  };
+
+  const handleStartGame = () => {
+    send({ action: 'startGame', payload: {} });
   };
 
   const handleFire = (x: number, y: number) => {
@@ -234,7 +350,15 @@ export default function App() {
   };
 
   const handleForfeit = () => {
-    send({ action: 'forfeit', payload: {} });
+    if (state.mode === 'streamer') {
+      if (state.role === 'viewer') {
+        send({ action: 'viewerForfeit', payload: {} });
+      } else {
+        send({ action: 'streamerForfeit', payload: {} });
+      }
+    } else {
+      send({ action: 'forfeit', payload: {} });
+    }
     clearSession();
   };
 
@@ -270,6 +394,7 @@ export default function App() {
         <div className="menu">
           <button onClick={() => handleCreateGame('ai')}>Play vs AI</button>
           <button onClick={() => handleCreateGame('pvp')}>Create PvP Game</button>
+          <button onClick={() => handleCreateGame('streamer')}>Create Streamer Game</button>
           <div style={{ display: 'flex', gap: '10px' }}>
             <input
               type="text"
@@ -282,6 +407,45 @@ export default function App() {
         </div>
       )}
 
+      {state.phase === 'lobby' && state.role === 'streamer' && (
+        <div className="game">
+          <div className="lobby-status">
+            <div className="game-info">
+              Share this Game ID: <span className="game-id">{state.gameId}</span>
+            </div>
+            <div className="viewer-count">
+              {state.viewerCount} players joined, {state.readyCount} ready
+            </div>
+          </div>
+          {state.myShips.length === 0 ? (
+            <ShipPlacer onComplete={handlePlaceShips} />
+          ) : (
+            <>
+              <Board ships={state.myShips} shots={[]} isOpponent={false} />
+              <div className="lobby-controls">
+                <button onClick={() => handleLockLobby(!state.lobbyLocked)}>
+                  {state.lobbyLocked ? 'Unlock Lobby' : 'Lock Lobby'}
+                </button>
+                <button 
+                  onClick={handleStartGame}
+                  disabled={state.readyCount === 0}
+                >
+                  Start Game ({state.readyCount} players)
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {state.phase === 'kicked' && (
+        <div className="game-over lost">
+          <h2>Kicked from Game</h2>
+          <p>{state.kickReason}</p>
+          <button onClick={handlePlayAgain}>Back to Menu</button>
+        </div>
+      )}
+
       {state.phase === 'placing' && (
         <div className="game">
           <div className="lobby-status">
@@ -290,11 +454,11 @@ export default function App() {
                 Share this Game ID: <span className="game-id">{state.gameId}</span>
               </div>
             )}
-            <div className={`opponent-status ${state.opponentReady ? 'ready' : ''}`}>
-              {!state.opponentJoined && 'Waiting for opponent to join...'}
-              {state.opponentJoined && !state.opponentReady && 'Waiting for opponent to place ships...'}
-              {state.opponentReady && 'Opponent is ready!'}
-            </div>
+            {!state.opponentJoined && (
+              <div className="opponent-status">
+                Waiting for opponent to join...
+              </div>
+            )}
           </div>
           <ShipPlacer onComplete={handlePlaceShips} />
         </div>
@@ -309,10 +473,18 @@ export default function App() {
               </div>
             )}
             <div className="game-info">Ships placed!</div>
-            <div className={`opponent-status ${state.opponentReady ? 'ready' : ''}`}>
-              {!state.opponentJoined && 'Waiting for opponent to join...'}
-              {state.opponentJoined && !state.opponentReady && 'Waiting for opponent to place ships...'}
-              {state.opponentReady && 'Opponent is ready!'}
+            <div className={`opponent-status ${(state.mode === 'streamer' ? state.streamerReady : state.opponentReady) ? 'ready' : ''}`}>
+              {state.mode === 'streamer' && state.role === 'viewer' ? (
+                state.streamerReady 
+                  ? 'Waiting for streamer to start game...'
+                  : 'Waiting for streamer to place ships...'
+              ) : (
+                <>
+                  {!state.opponentJoined && 'Waiting for opponent to join...'}
+                  {state.opponentJoined && !state.opponentReady && 'Waiting for opponent to place ships...'}
+                  {state.opponentReady && 'Opponent is ready!'}
+                </>
+              )}
             </div>
           </div>
           <Board ships={state.myShips} shots={[]} isOpponent={false} />
@@ -322,28 +494,48 @@ export default function App() {
       {state.phase === 'playing' && (
         <div className="game">
           <div className={`game-info ${state.yourTurn ? 'your-turn' : 'waiting'}`}>
-            <span>{state.yourTurn ? 'Your turn - click to fire!' : "Opponent's turn..."}</span>
-            {timeRemaining !== null && (
-              <span className="turn-timer">{Math.ceil(timeRemaining / 1000)}s</span>
+            <span>
+              {state.waitingForViewers 
+                ? 'Waiting for other viewers to finish...'
+                : state.yourTurn 
+                  ? 'Your turn - click to fire!' 
+                  : state.mode === 'streamer' && state.role === 'viewer'
+                    ? "Streamer's turn..."
+                    : "Opponent's turn..."}
+            </span>
+            {state.mode === 'streamer' && state.role === 'streamer' && !state.yourTurn && (
+              <span className="turn-timer">{state.viewersFired}/{state.activeViewerCount} viewers fired</span>
             )}
           </div>
+          {state.mode === 'streamer' && state.role === 'streamer' && (
+            <div className="viewer-count">Playing against {state.viewerCount} viewers</div>
+          )}
           <div className="boards">
             <div className="board-container">
               <div className="board-header">
                 <h3>Your Fleet</h3>
-                <span className="squares-remaining">
-                  {17 - state.opponentShots.filter(s => s.hit).length}/17
-                </span>
+                {state.mode === 'streamer' && state.role === 'streamer' ? (
+                  <span className="squares-remaining">
+                    {calculateFleetRemaining(state.myShips, state.cellHits, state.viewerCount).toFixed(1)}/17
+                  </span>
+                ) : (
+                  <span className="squares-remaining">
+                    {17 - state.opponentShots.filter(s => s.hit).length}/17
+                  </span>
+                )}
               </div>
               <Board
                 ships={state.myShips}
-                shots={state.opponentShots}
+                shots={state.mode === 'streamer' && state.role === 'streamer' ? [] : state.opponentShots}
                 isOpponent={false}
+                cellHits={state.mode === 'streamer' && state.role === 'streamer' ? state.cellHits : undefined}
+                cellMisses={state.mode === 'streamer' && state.role === 'streamer' ? state.cellMisses : undefined}
+                viewerCount={state.viewerCount}
               />
             </div>
             <div className="board-container">
               <div className="board-header">
-                <h3>Enemy Waters</h3>
+                <h3>{state.mode === 'streamer' && state.role === 'streamer' ? 'Viewers' : 'Enemy Waters'}</h3>
                 <span className="squares-remaining">
                   {17 - state.myShots.filter(s => s.hit).length}/17
                 </span>
@@ -354,7 +546,8 @@ export default function App() {
                 pendingShot={state.pendingShot}
                 isOpponent={true}
                 onCellClick={handleFire}
-                disabled={!state.yourTurn || !!state.pendingShot}
+                disabled={!state.yourTurn || !!state.pendingShot || state.waitingForViewers || state.hasFiredThisTurn}
+                attackHitRatios={state.mode === 'streamer' && state.role === 'streamer' ? state.attackHitRatios : undefined}
               />
             </div>
           </div>
@@ -365,13 +558,17 @@ export default function App() {
       )}
 
       {state.phase === 'finished' && (
-        <div className={`game-over ${state.winner === 'you' ? 'won' : 'lost'}`}>
-          <h2>{state.winner === 'you' ? 'Victory!' : 'Defeat'}</h2>
+        <div className={`game-over ${state.winner === 'you' || state.winner === 'streamer' ? 'won' : 'lost'}`}>
+          <h2>{state.winner === 'you' || (state.winner === 'streamer' && state.role === 'streamer') || (state.winner === 'viewers' && state.role === 'viewer') ? 'Victory!' : 'Defeat'}</h2>
           <p>
-            {state.winner === 'you' && state.winReason === 'opponent_forfeit' && 'Your opponent rage quit!'}
-            {state.winner === 'you' && state.winReason !== 'opponent_forfeit' && 'You sank all enemy ships!'}
-            {state.winner === 'opponent' && state.winReason === 'forfeit' && "Mission failed, we'll get em next time."}
-            {state.winner === 'opponent' && state.winReason !== 'forfeit' && 'Your fleet was destroyed.'}
+            {state.mode === 'streamer' && state.winner === 'streamer' && state.role === 'streamer' && 'You eliminated all viewers!'}
+            {state.mode === 'streamer' && state.winner === 'streamer' && state.role === 'viewer' && 'The streamer eliminated all viewers.'}
+            {state.mode === 'streamer' && state.winner === 'viewers' && state.role === 'viewer' && 'The viewers sank the streamer\'s fleet!'}
+            {state.mode === 'streamer' && state.winner === 'viewers' && state.role === 'streamer' && 'The viewers sank your fleet!'}
+            {state.mode !== 'streamer' && state.winner === 'you' && state.winReason === 'opponent_forfeit' && 'Your opponent rage quit!'}
+            {state.mode !== 'streamer' && state.winner === 'you' && state.winReason !== 'opponent_forfeit' && 'You sank all enemy ships!'}
+            {state.mode !== 'streamer' && state.winner === 'opponent' && state.winReason === 'forfeit' && "Mission failed, we'll get em next time."}
+            {state.mode !== 'streamer' && state.winner === 'opponent' && state.winReason !== 'forfeit' && 'Your fleet was destroyed.'}
           </p>
           <button onClick={handlePlayAgain}>Play Again</button>
         </div>
