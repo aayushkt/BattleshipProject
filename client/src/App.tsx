@@ -9,11 +9,11 @@ const WS_URL = import.meta.env.VITE_WS_URL || null;
 const STORAGE_KEY = 'battleship_session';
 
 function saveSession(gameId: string, playerId: string) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ gameId, playerId }));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ gameId, playerId }));
 }
 
 function loadSession(): { gameId: string; playerId: string } | null {
-  const data = localStorage.getItem(STORAGE_KEY);
+  const data = sessionStorage.getItem(STORAGE_KEY);
   if (!data) return null;
   try {
     return JSON.parse(data);
@@ -23,7 +23,7 @@ function loadSession(): { gameId: string; playerId: string } | null {
 }
 
 function clearSession() {
-  localStorage.removeItem(STORAGE_KEY);
+  sessionStorage.removeItem(STORAGE_KEY);
 }
 
 // Calculate streamer's remaining fleet from cellHits
