@@ -38,13 +38,16 @@ export interface Player {
   ready: boolean; // ships placed
 }
 
+export const TURN_DURATION_MS = 45000;
+
 export interface GameState {
   gameId: string;
   mode: GameMode;
   phase: GamePhase;
   player1: Player;
   player2: Player | null; // null until opponent joins (or AI)
-  currentTurn: string; // player id
+  currentTurn: string; // player id (base turn, before timeout calculation)
+  turnStartedAt: number; // timestamp when turn timer started
   winner: string | null;
 }
 

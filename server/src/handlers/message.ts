@@ -9,8 +9,11 @@ import {
   validateShot,
   generateAIShips,
   getAIShot,
+  getShipCells,
+  calculateCurrentTurn,
   Ship,
   GameState,
+  TURN_DURATION_MS,
 } from '../game';
 import {
   getGame,
@@ -53,6 +56,12 @@ export const handler: APIGatewayProxyWebsocketHandlerV2 = async (event) => {
         break;
       case 'fire':
         await handleFire(connectionId, message.payload);
+        break;
+      case 'forfeit':
+        await handleForfeit(connectionId);
+        break;
+      case 'reconnect':
+        await handleReconnect(connectionId, message.payload);
         break;
       case 'getState':
         await handleGetState(connectionId, message.payload);
@@ -102,10 +111,13 @@ async function handleJoinGame(connectionId: string, payload: { gameId: string })
   await saveGame(newState);
   await saveConnection(connectionId, payload.gameId, playerId);
 
+  // Check if creator (player1) has already placed ships
+  const opponentReady = state.player1.ready;
+
   // Notify joiner
   await sendToConnection(connectionId, {
     event: 'gameJoined',
-    payload: { gameId: payload.gameId, playerId },
+    payload: { gameId: payload.gameId, playerId, opponentReady },
   });
 
   // Notify existing player
@@ -113,6 +125,70 @@ async function handleJoinGame(connectionId: string, payload: { gameId: string })
   await broadcast(connections, {
     event: 'opponentJoined',
     payload: { opponentId: playerId },
+  });
+}
+
+async function handleReconnect(connectionId: string, payload: { gameId: string; playerId: string }) {
+  const state = await getGame(payload.gameId);
+  if (!state) {
+    await sendError(connectionId, 'GAME_NOT_FOUND', 'Game not found');
+    return;
+  }
+
+  // Verify player is part of this game
+  const isPlayer1 = state.player1.id === payload.playerId;
+  const isPlayer2 = state.player2?.id === payload.playerId;
+  if (!isPlayer1 && !isPlayer2) {
+    await sendError(connectionId, 'NOT_IN_GAME', 'Not a participant in this game');
+    return;
+  }
+
+  // Save new connection
+  await saveConnection(connectionId, payload.gameId, payload.playerId);
+
+  // Build reconnect payload
+  const me = isPlayer1 ? state.player1 : state.player2!;
+  const opponent = isPlayer1 ? state.player2 : state.player1;
+
+  // Compute sunk enemy ships from opponent's board
+  const sunkEnemyShips: { type: string; cells: { x: number; y: number }[] }[] = [];
+  if (opponent) {
+    for (const ship of opponent.board.ships) {
+      const cells = getShipCells(ship);
+      const allHit = cells.every(cell =>
+        opponent.board.shotsReceived.some(shot => shot.x === cell.x && shot.y === cell.y && shot.hit)
+      );
+      if (allHit) {
+        sunkEnemyShips.push({ type: ship.type, cells });
+      }
+    }
+  }
+
+  // Calculate actual current turn if game is playing
+  let yourTurn = false;
+  let turnStartedAt = state.turnStartedAt;
+  if (state.phase === 'playing' && state.turnStartedAt > 0) {
+    const { playerId: actualTurn } = calculateCurrentTurn(state);
+    yourTurn = actualTurn === payload.playerId;
+  }
+
+  await sendToConnection(connectionId, {
+    event: 'reconnected',
+    payload: {
+      gameId: state.gameId,
+      playerId: payload.playerId,
+      mode: state.mode,
+      phase: state.phase,
+      myShips: me.board.ships,
+      myShots: opponent?.board.shotsReceived || [],
+      opponentShots: me.board.shotsReceived,
+      sunkEnemyShips,
+      opponentJoined: !!opponent,
+      opponentReady: opponent?.ready || false,
+      yourTurn,
+      turnStartedAt,
+      winner: state.winner === payload.playerId ? 'you' : state.winner ? 'opponent' : null,
+    },
   });
 }
 
@@ -143,9 +219,19 @@ async function handlePlaceShips(connectionId: string, payload: { ships: Ship[] }
     payload: { success: true },
   });
 
+  // Notify opponent that this player is ready
+  const connections = await getConnectionsForGame(conn.gameId);
+  for (const connId of connections) {
+    if (connId !== connectionId) {
+      await sendToConnection(connId, {
+        event: 'opponentReady',
+        payload: {},
+      });
+    }
+  }
+
   // If game started, notify both players
   if (newState.phase === 'playing') {
-    const connections = await getConnectionsForGame(conn.gameId);
     for (const connId of connections) {
       const c = await getConnection(connId);
       if (c) {
@@ -171,8 +257,13 @@ async function handleFire(connectionId: string, payload: { x: number; y: number 
     return;
   }
 
-  if (state.currentTurn !== conn.playerId) {
-    await sendError(connectionId, 'NOT_YOUR_TURN', 'Not your turn');
+  // Calculate whose turn it actually is based on elapsed time
+  const { playerId: actualTurn, remainingMs } = calculateCurrentTurn(state);
+  if (actualTurn !== conn.playerId) {
+    await sendToConnection(connectionId, {
+      event: 'error',
+      payload: { code: 'NOT_YOUR_TURN', message: 'Not your turn', remainingMs },
+    });
     return;
   }
 
@@ -190,6 +281,11 @@ async function handleFire(connectionId: string, payload: { x: number; y: number 
   }
 
   const result = fire(state, conn.playerId, payload.x, payload.y);
+  
+  // Reset turn timer on successful fire
+  result.state.turnStartedAt = Date.now();
+  result.state.currentTurn = opponent.id; // Base turn is now opponent
+  
   await saveGame(result.state);
   await saveMove(conn.gameId, conn.playerId, payload.x, payload.y, result.hit, result.sunk?.type);
 
@@ -215,7 +311,7 @@ async function handleFire(connectionId: string, payload: { x: number; y: number 
           event: 'gameOver',
           payload: {
             winner: result.winner === c.playerId ? 'you' : 'opponent',
-            reason: 'All ships sunk',
+            reason: 'sunk',
           },
         });
       } else {
@@ -230,6 +326,46 @@ async function handleFire(connectionId: string, payload: { x: number; y: number 
   // AI turn
   if (!result.gameOver && result.state.mode === 'ai' && result.state.currentTurn === 'AI') {
     await handleAITurn(conn.gameId, connectionId, conn.playerId);
+  }
+}
+
+async function handleForfeit(connectionId: string) {
+  const conn = await getConnection(connectionId);
+  if (!conn) {
+    await sendError(connectionId, 'NOT_IN_GAME', 'Not in a game');
+    return;
+  }
+
+  const state = await getGame(conn.gameId);
+  if (!state) {
+    await sendError(connectionId, 'GAME_NOT_FOUND', 'Game not found');
+    return;
+  }
+
+  // Update game state
+  const opponent = state.player1.id === conn.playerId ? state.player2 : state.player1;
+  const newState: GameState = {
+    ...state,
+    phase: 'finished',
+    winner: opponent?.id || null,
+  };
+  await saveGame(newState);
+
+  // Notify the forfeiting player
+  await sendToConnection(connectionId, {
+    event: 'gameOver',
+    payload: { winner: 'opponent', reason: 'forfeit' },
+  });
+
+  // Notify opponent
+  const connections = await getConnectionsForGame(conn.gameId);
+  for (const connId of connections) {
+    if (connId !== connectionId) {
+      await sendToConnection(connId, {
+        event: 'gameOver',
+        payload: { winner: 'you', reason: 'opponent_forfeit' },
+      });
+    }
   }
 }
 
@@ -262,7 +398,7 @@ async function handleAITurn(gameId: string, playerConnectionId: string, playerId
       event: 'gameOver',
       payload: {
         winner: result.winner === playerId ? 'you' : 'opponent',
-        reason: 'All ships sunk',
+        reason: 'sunk',
       },
     });
   } else {

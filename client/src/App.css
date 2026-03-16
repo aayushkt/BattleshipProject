@@ -86,8 +86,27 @@
   gap: 10px;
 }
 
+.board-header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.board-header h3 {
+  margin: 0;
+}
+
 .board-container h3 {
   color: #a0aec0;
+}
+
+.squares-remaining {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #63b3ed;
+  background: #1a202c;
+  padding: 4px 10px;
+  border-radius: 4px;
 }
 
 .game-over {
@@ -145,4 +164,57 @@
   background: #2d3748;
   padding: 5px 10px;
   border-radius: 4px;
+}
+
+
+.lobby-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.opponent-status {
+  padding: 10px 20px;
+  background: #1a202c;
+  border-radius: 8px;
+  color: #ed8936;
+  border: 1px solid #ed8936;
+}
+
+.opponent-status.ready {
+  color: #48bb78;
+  border-color: #48bb78;
+}
+
+
+.forfeit-btn {
+  margin-top: 20px;
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid #e53e3e;
+  border-radius: 4px;
+  color: #e53e3e;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.forfeit-btn:hover {
+  background: #e53e3e;
+  color: #1a202c;
+}
+
+.turn-timer {
+  font-weight: bold;
+  margin-left: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-info.your-turn .turn-timer {
+  color: #4ade80;
+}
+
+.game-info.waiting .turn-timer {
+  color: #fbbf24;
 }
