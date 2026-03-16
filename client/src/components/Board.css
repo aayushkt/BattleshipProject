@@ -17,8 +17,8 @@
 }
 
 .cell {
-  width: 32px;
-  height: 32px;
+  width: 50px;
+  height: 50px;
   background: #16213e;
   border-radius: 4px;
   transition: background 0.15s;
@@ -42,19 +42,6 @@
 
 .cell.miss {
   background: #2d3748;
-  position: relative;
-}
-
-.cell.miss::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 8px;
-  height: 8px;
-  background: #4a5568;
-  border-radius: 50%;
 }
 
 .cell.sunk {
@@ -80,7 +67,7 @@
 }
 
 .heat-percent {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: bold;
   color: white;
   text-shadow: 0 0 2px black;

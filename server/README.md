@@ -2,61 +2,57 @@
 
 Lambda functions and game logic for Battleship.
 
-## Responsibilities
-
-- WebSocket connection management
-- Game state management (create, join, play)
-- Ship placement validation
-- Shot resolution (hit/miss/sunk)
-- AI opponent logic
-- Move history recording
-
 ## Structure
 
 ```
-server/
-├── src/
-│   ├── handlers/          # Lambda entry points
-│   │   ├── connect.ts     # $connect route
-│   │   ├── disconnect.ts  # $disconnect route
-│   │   └── message.ts     # $default route (game actions)
-│   ├── game/              # Core game logic (pure functions)
-│   │   ├── state.ts       # Game state types and operations
-│   │   ├── validation.ts  # Ship placement and move validation
-│   │   ├── ai.ts          # AI shot selection
-│   │   └── rules.ts       # Win conditions, turn logic
-│   └── db/                # DynamoDB operations
-│       └── client.ts
-└── package.json
+src/
+├── handlers/       Lambda entry points ($connect, $disconnect, $default)
+├── game/           Core game logic (pure functions, no AWS deps)
+│   ├── types.ts    Game state types
+│   ├── rules.ts    Ship placement, shot resolution, win conditions
+│   ├── ai.ts       AI shot selection (hunt/target algorithm)
+│   └── index.ts    Exports
+└── db/             DynamoDB operations
 ```
 
-## Local Development
+## Handler Routing
+
+`message.ts` routes WebSocket messages by `action` field:
+
+| Action | Handler | Description |
+|--------|---------|-------------|
+| `createGame` | `handleCreateGame` | Start AI/PvP game |
+| `createStreamerGame` | `handleCreateStreamerGame` | Start streamer lobby |
+| `joinGame` | `handleJoinGame` / `handleViewerJoin` | Join existing game |
+| `placeShips` | `handlePlaceShips` / streamer variants | Submit ship placement |
+| `fire` | `handleFire` / streamer variants | Fire at coordinate |
+| `startGame` | `handleStartStreamerGame` | Streamer starts match |
+| `viewerForfeit` | `handleViewerForfeit` | Viewer leaves mid-game |
+
+## Game Logic
+
+The `game/` folder contains pure functions with no AWS dependencies:
+
+- `validateShipPlacement()` - Checks ships fit on board, don't overlap
+- `processShot()` - Returns hit/miss/sunk result
+- `checkWinCondition()` - Determines if game is over
+- `getAIShot()` - Hunt/target AI algorithm
+
+This separation allows unit testing without mocks and keeps business logic portable.
+
+## Streamer Mode
+
+Streamer mode uses different state structures:
+
+- `StreamerGameState` - Tracks all viewers, cell hit counts, turn state
+- `ViewerState` - Individual viewer's board and firing status
+- Heat map: `cellHits[coord]` / `viewerCount` = intensity (0-1)
+
+Turn flow is server-driven: all viewers must fire before turn switches to streamer.
+
+## Build
 
 ```bash
 npm install
-npm run test        # Unit tests
-npm run test:watch  # Watch mode
+npm run build   # Outputs to dist/
 ```
-
-## API (WebSocket Messages)
-
-### Client to Server
-
-| Action | Payload | Description |
-|--------|---------|-------------|
-| `createGame` | `{ mode: 'ai' \| 'pvp' }` | Start new game |
-| `joinGame` | `{ gameId }` | Join existing game |
-| `placeShips` | `{ ships: Ship[] }` | Submit ship placement |
-| `fire` | `{ x, y }` | Fire at coordinate |
-
-### Server to Client
-
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `gameCreated` | `{ gameId }` | Game ready, waiting for opponent |
-| `gameStarted` | `{ opponentReady }` | Both players joined |
-| `shipsPlaced` | `{ success }` | Placement confirmed |
-| `fireResult` | `{ x, y, hit, sunk?, shipType? }` | Shot outcome |
-| `turnChange` | `{ yourTurn }` | Turn notification |
-| `gameOver` | `{ winner, reason }` | Game ended |
-| `error` | `{ code, message }` | Validation failure |

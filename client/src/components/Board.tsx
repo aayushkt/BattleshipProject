@@ -85,7 +85,7 @@ export function Board({
       if (hits === 0) return {};
       const intensity = Math.min(hits / viewerCount, 1);
       return { 
-        style: { backgroundColor: lerpColor('#742a2a', '#e53e3e', intensity) },
+        style: { backgroundColor: lerpColor('#3d1515', '#e53e3e', intensity) },
         percent: Math.round(intensity * 100),
       };
     } else {
@@ -93,7 +93,7 @@ export function Board({
       if (misses === 0) return {};
       const intensity = Math.min(misses / viewerCount, 1);
       return { 
-        style: { backgroundColor: lerpColor('#2a742a', '#3ee53e', intensity) },
+        style: { backgroundColor: lerpColor('#153d15', '#3ee53e', intensity) },
         percent: Math.round(intensity * 100),
       };
     }
@@ -116,7 +116,7 @@ export function Board({
               // For streamer attack board, use intensity coloring for hits
               let attackStyle: React.CSSProperties | undefined;
               if (attackRatio !== undefined && attackRatio > 0) {
-                attackStyle = { backgroundColor: lerpColor('#742a2a', '#e53e3e', attackRatio) };
+                attackStyle = { backgroundColor: lerpColor('#3d1515', '#e53e3e', attackRatio) };
               }
               
               let className = 'cell';

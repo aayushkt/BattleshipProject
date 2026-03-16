@@ -1,52 +1,41 @@
 # Battleship
 
-A full-featured, multiplayer Battleship game with AI opponent support, built on AWS serverless infrastructure.
+Multiplayer Battleship game built on AWS serverless infrastructure. Supports 1v1 (PvP or AI) and streamer mode (1 vs many viewers).
 
-## Features
-
-- **Single-player vs AI** — Intelligent AI that hunts ships strategically
-- **Real-time Multiplayer** — Two players, separate browsers, live updates
-- **Persistent State** — Refresh mid-game without losing progress
-- **Game History** — All moves stored for replay/analysis
-
-## Project Structure
+## Components
 
 ```
-battleship/
-├── client/              # React frontend
-│   ├── README.md        # Setup, running locally
-│   └── DESIGN.md        # Frontend architecture decisions
-├── server/              # Lambda handlers + game logic
-│   ├── README.md        # API reference, local testing
-│   └── DESIGN.md        # Server architecture decisions
-├── infrastructure/      # AWS CDK
-│   ├── README.md        # Deployment instructions
-│   └── DESIGN.md        # Infrastructure decisions
-├── docs/
-│   ├── architecture.md  # System overview
-│   └── DESIGN.md        # Cross-cutting concerns
-├── SPIKE.md             # Project spike explanation
-└── README.md            # You are here
+├── client/         React SPA (Vite + TypeScript)
+├── server/         Lambda handlers + game logic
+├── infrastructure/ AWS CDK stack
+└── deploy.sh       Build and deploy script
 ```
 
-## Documentation Philosophy
+## Game Modes
 
-Each component has two docs:
-- **README.md** — What it does, how to use it
-- **DESIGN.md** — Why it's built this way, future considerations
-
-See [SPIKE.md](SPIKE.md) for the reasoning behind this structure.
+- **AI**: Single player vs server-side AI
+- **PvP**: Two players via shared game ID
+- **Streamer**: One streamer vs up to 500 viewers with heat map visualization
 
 ## Quick Start
 
 ```bash
-# Frontend
-cd client && npm install && npm run dev
+# Deploy everything
+./deploy.sh
 
-# Deploy infrastructure
-cd infrastructure && cdk deploy
+# Local client development
+cd client && npm install && npm run dev
 ```
 
-## Live Demo
+## Architecture
 
-[Play Battleship](https://battleship.example.com) — link updated after deployment
+```
+CloudFront ─┬─ S3 (React SPA)
+            └─ API Gateway (WebSocket) ─ Lambda ─ DynamoDB
+```
+
+All game logic is server-authoritative. Clients send actions, server validates and broadcasts results.
+
+## Live
+
+https://d5rqyvhtzgfip.cloudfront.net
