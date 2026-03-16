@@ -1,0 +1,148 @@
+.app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+}
+
+.app h1 {
+  font-size: 2.5rem;
+  margin-bottom: 30px;
+  color: #63b3ed;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  align-items: center;
+}
+
+.menu button {
+  padding: 15px 40px;
+  font-size: 1.1rem;
+  background: #2d3748;
+  border: 2px solid #4a5568;
+  border-radius: 8px;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 200px;
+}
+
+.menu button:hover {
+  background: #4a5568;
+  border-color: #63b3ed;
+}
+
+.menu input {
+  padding: 12px 20px;
+  font-size: 1rem;
+  background: #1a202c;
+  border: 2px solid #4a5568;
+  border-radius: 8px;
+  color: #e2e8f0;
+  width: 200px;
+}
+
+.menu input::placeholder {
+  color: #718096;
+}
+
+.game {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.game-info {
+  text-align: center;
+  padding: 15px 30px;
+  background: #1a202c;
+  border-radius: 8px;
+}
+
+.game-info.your-turn {
+  border: 2px solid #48bb78;
+}
+
+.game-info.waiting {
+  border: 2px solid #ed8936;
+}
+
+.boards {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.board-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.board-container h3 {
+  color: #a0aec0;
+}
+
+.game-over {
+  text-align: center;
+  padding: 30px;
+  background: #1a202c;
+  border-radius: 8px;
+}
+
+.game-over h2 {
+  font-size: 2rem;
+  margin-bottom: 20px;
+}
+
+.game-over.won h2 {
+  color: #48bb78;
+}
+
+.game-over.lost h2 {
+  color: #e53e3e;
+}
+
+.game-over button {
+  margin-top: 20px;
+  padding: 12px 30px;
+  font-size: 1rem;
+  background: #2d3748;
+  border: 2px solid #4a5568;
+  border-radius: 8px;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.game-over button:hover {
+  background: #4a5568;
+}
+
+.status {
+  padding: 10px 20px;
+  background: #2d3748;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.status.connecting {
+  color: #ed8936;
+}
+
+.status.error {
+  color: #e53e3e;
+}
+
+.game-id {
+  font-family: monospace;
+  background: #2d3748;
+  padding: 5px 10px;
+  border-radius: 4px;
+}

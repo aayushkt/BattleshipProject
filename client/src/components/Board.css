@@ -1,0 +1,72 @@
+.board {
+  display: inline-block;
+  padding: 10px;
+  background: #1a1a2e;
+  border-radius: 8px;
+}
+
+.board-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.board-row {
+  display: flex;
+  gap: 2px;
+}
+
+.cell {
+  width: 32px;
+  height: 32px;
+  background: #16213e;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.cell.clickable {
+  cursor: pointer;
+}
+
+.cell.clickable:hover {
+  background: #0f3460;
+}
+
+.cell.ship {
+  background: #4a5568;
+}
+
+.cell.hit {
+  background: #e53e3e;
+}
+
+.cell.miss {
+  background: #2d3748;
+  position: relative;
+}
+
+.cell.miss::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background: #4a5568;
+  border-radius: 50%;
+}
+
+.cell.sunk {
+  background: #742a2a;
+}
+
+.cell.pending {
+  background: #805ad5;
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}

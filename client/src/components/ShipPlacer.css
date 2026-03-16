@@ -1,0 +1,41 @@
+.ship-placer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.placer-info {
+  text-align: center;
+}
+
+.placer-info button {
+  margin-top: 10px;
+  padding: 8px 16px;
+  background: #4a5568;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+}
+
+.placer-info button:hover {
+  background: #5a6578;
+}
+
+.placer-board {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  background: #1a1a2e;
+  border-radius: 8px;
+}
+
+.cell.preview-valid {
+  background: #38a169;
+}
+
+.cell.preview-invalid {
+  background: #e53e3e;
+}
