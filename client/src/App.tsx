@@ -493,11 +493,11 @@ export default function App() {
 
       {state.phase === 'playing' && (
         <div className="game">
-          <div className={`game-info ${state.yourTurn ? 'your-turn' : 'waiting'}`}>
+          <div className={`game-info ${state.yourTurn && !state.hasFiredThisTurn ? 'your-turn' : 'waiting'}`}>
             <span>
-              {state.waitingForViewers 
+              {state.waitingForViewers || (state.mode === 'streamer' && state.role === 'viewer' && state.hasFiredThisTurn)
                 ? 'Waiting for other viewers to finish...'
-                : state.yourTurn 
+                : state.yourTurn && !state.hasFiredThisTurn
                   ? 'Your turn - click to fire!' 
                   : state.mode === 'streamer' && state.role === 'viewer'
                     ? "Streamer's turn..."
@@ -537,7 +537,9 @@ export default function App() {
               <div className="board-header">
                 <h3>{state.mode === 'streamer' && state.role === 'streamer' ? 'Viewers' : 'Enemy Waters'}</h3>
                 <span className="squares-remaining">
-                  {17 - state.myShots.filter(s => s.hit).length}/17
+                  {state.mode === 'streamer' && state.role === 'streamer'
+                    ? `${(17 - Object.values(state.attackHitRatios).reduce((sum, r) => sum + r, 0)).toFixed(1)}/17`
+                    : `${17 - state.myShots.filter(s => s.hit).length}/17`}
                 </span>
               </div>
               <Board
